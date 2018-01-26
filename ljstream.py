@@ -5,7 +5,7 @@ import threading
 import time
 from labjack import ljm
 from datetime import datetime
-from uuid import getnode as getmac
+from uuid import getnode as getmac, uuid4
 
 
 DATA_BYTE_SIZE = 2
@@ -35,31 +35,36 @@ def setup_devices():
                 ain_start = device.get('starting_address', 0)
                 channel_addrs.append(int(ain_start + DATA_BYTE_SIZE * channel))
 
-            try:
                 device_id = device.get('device_id', '')
                 sample_rate = device.get('sample_rate', 0)
                 read_rate = device.get('read_rate', 0)
-                ljm_devices[device_id] = ljm.open(ljm.constants.dtANY, 
-                                                  ljm.constants.ctANY,
-                                                  device_id)
 
-                ljm.eStreamStart(ljm_devices[device_id], read_rate, 
-                                len(channel_addrs), channel_addrs, sample_rate)
+            try:
+                ljd = ljm.open(ljm.constants.dtANY,
+                               ljm.constants.ctANY,
+                               device_id)
+
+                ljm.eStreamStart(ljd, read_rate,
+                                 len(channel_addrs), channel_addrs, sample_rate)
+
+                ljm_devices[device_id] = ljd
             except:
                 pass
     return (ljm_devices, config)
 
 def stream_data(q, ljm_devices):
+    print("Reading thread has started.")
     try:
         # ljm.eWriteAddress(ljm_device, 1000, ljm.constants.FLOAT32, 2.5)
         remaining_data = {}
-        #while True:
-        for _ in range(NUM_READS):
+        while True:
+        #for _ in range(NUM_READS):
             for device_id in ljm_devices:
                 print("Reading from {0}...".format(device_id))
                 results = ljm.eStreamRead(ljm_devices[device_id])
                 read_time = str(datetime.now())
-                reading = {"rpi_mac": get_device_mac(),
+                reading = {"id": str(uuid4()),
+                           "rpi_mac": get_device_mac(),
                            "device_id": device_id,
                            "read_time": read_time,
                            "data": results[0]}
@@ -71,7 +76,8 @@ def stream_data(q, ljm_devices):
                 print("Reading from {0}...".format(device_id))
                 results = ljm.eStreamRead(ljm_devices[device_id])
                 read_time = str(datetime.now())
-                reading = {"rpi_mac": get_device_mac(),
+                reading = {"id": str(uuid4()),
+                           "rpi_mac": get_device_mac(),
                            "device_id": device_id,
                            "read_time": read_time,
                            "data": results[0]}
@@ -90,6 +96,7 @@ def stream_data(q, ljm_devices):
 
 
 def write_data(q):
+    print("Writing thread has started.")
     global is_reading
     while not q.empty() or is_reading:
         if not q.empty():
@@ -112,11 +119,12 @@ def write_data(q):
             time.sleep(1)
 
 def main():
-    num_channels = 1
     global is_reading
     is_reading = True
     q = queue.Queue()
     ljm_devices, config = setup_devices()
+    print(ljm_devices)
+    print(config)
 
     read_thread = threading.Thread(target=stream_data, args=(q, ljm_devices))
     write_thread = threading.Thread(target=write_data, args=(q,))
